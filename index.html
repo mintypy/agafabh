@@ -4,7 +4,7 @@
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
 		<title>A Game About Feeding A Black Hole</title>
-
+		
 		<style>
 html, body, #canvas {
 	margin: 0;
@@ -163,19 +163,21 @@ const engine = new Engine(GODOT_CONFIG);
 	}
 
 	const PCK_BASE = "agafabh.pck";
-	const NUM_PARTS = 7;
+	const PCK_NUM_PARTS = 7;
 
-	async function fetchAndCombineParts() {
+	const WASM_BASE = "agafabh.wasm";
+	const WASM_NUM_PARTS = 2;
+
+	async function fetchAndCombineParts(base, numParts) {
 		setStatusMode('progress');
 		const parts = [];
-		for (let i = 1; i <= NUM_PARTS; i++) {
-			const url = `${PCK_BASE}.part${i}`;
+		for (let i = 1; i <= numParts; i++) {
+			const url = `${base}.part${i}`;
 			const resp = await fetch(url);
 			if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
 			parts.push(await resp.arrayBuffer());
 		}
 
-		// Combine all parts into one ArrayBuffer
 		const totalSize = parts.reduce((sum, p) => sum + p.byteLength, 0);
 		const combined = new Uint8Array(totalSize);
 		let offset = 0;
@@ -218,14 +220,23 @@ const engine = new Engine(GODOT_CONFIG);
 			displayFailureNotice(missingMsg + missing.join('\n'));
 		}
 	} else {
-		fetchAndCombineParts().then((combinedBuffer) => {
-			// Override fetch so Godot receives the pre-assembled PCK buffer
+		Promise.all([
+			fetchAndCombineParts(PCK_BASE, PCK_NUM_PARTS),
+			fetchAndCombineParts(WASM_BASE, WASM_NUM_PARTS),
+		]).then(([pckBuffer, wasmBuffer]) => {
+			// Override fetch so Godot receives the pre-assembled PCK and WASM buffers
 			const origFetch = window.fetch;
 			window.fetch = function (url, ...args) {
 				if (typeof url === 'string' && url.endsWith('.pck')) {
-					return Promise.resolve(new Response(combinedBuffer, {
+					return Promise.resolve(new Response(pckBuffer, {
 						status: 200,
 						headers: { 'Content-Type': 'application/octet-stream' }
+					}));
+				}
+				if (typeof url === 'string' && url.endsWith('.wasm')) {
+					return Promise.resolve(new Response(wasmBuffer, {
+						status: 200,
+						headers: { 'Content-Type': 'application/wasm' }
 					}));
 				}
 				return origFetch(url, ...args);
